@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>カウントバトル - カードで戦うサーティー</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+
+  <header class="app-header">
+    <h1>カウントバトル</h1>
+    <p class="subtitle">数を言い合うゲーム「サーティー」に、戦略カードを加えたバリエーション</p>
+    <button id="rules-open-btn" class="link-btn" type="button">ルール・カード一覧を見る</button>
+  </header>
+
+  <!-- セットアップ画面 -->
+  <section id="setup-screen" class="screen">
+    <h2>ゲームの設定</h2>
+
+    <div class="field-row">
+      <label for="player-count">プレイヤー人数(2〜6人)</label>
+      <input type="number" id="player-count" min="2" max="6" value="3">
+    </div>
+
+    <div id="player-name-fields" class="player-name-fields"></div>
+
+    <div class="field-row">
+      <label for="limit-number">上限の数(この数を言ったら負け)</label>
+      <input type="number" id="limit-number" min="5" value="30">
+    </div>
+
+    <div class="field-row">
+      <label for="max-advance">1ターンで進められる数の最大(カウント数)</label>
+      <input type="number" id="max-advance" min="1" value="3">
+    </div>
+
+    <div class="field-row">
+      <label for="hand-size">最初に配られるカードの枚数</label>
+      <input type="number" id="hand-size" min="0" value="3">
+    </div>
+
+    <details class="advanced-settings">
+      <summary>詳細設定(カードの枚数)</summary>
+      <div class="field-row">
+        <label for="deck-copies">カード1種類あたりの山札枚数</label>
+        <input type="number" id="deck-copies" min="1" value="4">
+      </div>
+    </details>
+
+    <p id="setup-error" class="error-text" hidden></p>
+
+    <button id="start-game-btn" class="primary-btn" type="button">ゲーム開始</button>
+  </section>
+
+  <!-- 手番交代の目隠し画面 -->
+  <section id="transition-screen" class="screen" hidden>
+    <div class="transition-box">
+      <p class="transition-label">次の番</p>
+      <h2 id="transition-player-name"></h2>
+      <p class="transition-hint">他のプレイヤーは画面を見ないようにしてください。</p>
+      <button id="reveal-hand-btn" class="primary-btn" type="button">自分の番を始める</button>
+    </div>
+  </section>
+
+  <!-- ゲーム画面 -->
+  <section id="game-screen" class="screen" hidden>
+
+    <div class="status-bar">
+      <div class="status-item">
+        <span class="status-label">現在のカウント</span>
+        <span id="current-count" class="status-value">0</span>
+      </div>
+      <div class="status-item">
+        <span class="status-label">上限</span>
+        <span id="current-limit" class="status-value">30</span>
+      </div>
+      <div class="status-item">
+        <span class="status-label">進行方向</span>
+        <span id="current-direction" class="status-value">→</span>
+      </div>
+    </div>
+
+    <div id="players-overview" class="players-overview"></div>
+
+    <div class="turn-panel">
+      <h2 id="current-turn-label">プレイヤーの番</h2>
+
+      <div class="hand-section">
+        <h3>手札(クリックで使用)</h3>
+        <div id="hand-area" class="hand-area"></div>
+      </div>
+
+      <div class="move-section">
+        <h3>数を進める(1〜<span id="max-advance-display">3</span>)</h3>
+        <div id="move-area" class="move-area"></div>
+      </div>
+    </div>
+
+    <div class="log-section">
+      <h3>ログ</h3>
+      <div id="log-area" class="log-area"></div>
+    </div>
+  </section>
+
+  <!-- 結果画面 -->
+  <section id="result-screen" class="screen" hidden>
+    <h2 id="result-title"></h2>
+    <button id="restart-btn" class="primary-btn" type="button">もう一度あそぶ</button>
+  </section>
+
+  <!-- ルール／カード一覧モーダル -->
+  <div id="rules-modal" class="modal" hidden>
+    <div class="modal-content">
+      <button id="rules-close-btn" class="modal-close-btn" type="button">×</button>
+      <h2>遊び方</h2>
+      <ol>
+        <li>全員に手札が配られ、カウントは0からスタートします。</li>
+        <li>自分の番になったら、まず手札のカードを好きな枚数(0枚でも可)使えます。カードは使うとすぐ効果が発動します。</li>
+        <li>最後に、現在のカウントから「1〜その時の最大値」の中で好きな数だけカウントを進めます(数字を言うイメージ)。</li>
+        <li>カウントが上限の数に到達してしまったプレイヤーは脱落します。「まもり」カードを使っていれば1回だけ回避できます。</li>
+        <li>最後まで残った1人が勝者です。</li>
+      </ol>
+      <h2>カード一覧</h2>
+      <div id="rules-card-list" class="rules-card-list"></div>
+    </div>
+  </div>
+
+</div>
+<script src="game.js"></script>
+</body>
+</html>
