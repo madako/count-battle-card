@@ -80,6 +80,10 @@
         <span class="status-label">進行方向</span>
         <span id="current-direction" class="status-value">→</span>
       </div>
+      <div class="status-item">
+        <span class="status-label">墓地</span>
+        <span id="current-graveyard" class="status-value">0</span>
+      </div>
     </div>
 
     <div id="players-overview" class="players-overview"></div>
@@ -109,6 +113,33 @@
     <h2 id="result-title"></h2>
     <button id="restart-btn" class="primary-btn" type="button">もう一度あそぶ</button>
   </section>
+
+  <!-- cha発動チャンスの目隠し画面 -->
+  <section id="cha-transition-screen" class="screen" hidden>
+    <div class="transition-box">
+      <p class="transition-label">cha発動チャンス</p>
+      <h2 id="cha-transition-player-name"></h2>
+      <p class="transition-hint">他のプレイヤーは画面を見ないようにしてください。</p>
+      <button id="cha-reveal-btn" class="primary-btn" type="button">確認する</button>
+    </div>
+  </section>
+
+  <!-- cha発動チャンスの応答画面 -->
+  <section id="cha-response-screen" class="screen" hidden>
+    <div class="turn-panel">
+      <p id="cha-response-host-card" class="cha-host-info"></p>
+      <h2 id="cha-response-player-name"></h2>
+      <div id="cha-response-cards" class="hand-area"></div>
+      <button id="cha-pass-btn" class="secondary-btn" type="button">パス(何もしない)</button>
+    </div>
+  </section>
+
+  <!-- カード使用時の選択モーダル(enc添付・対象選択・選択肢・山札プレビュー) -->
+  <div id="play-modal" class="modal" hidden>
+    <div class="modal-content">
+      <div id="play-modal-body"></div>
+    </div>
+  </div>
 
   <!-- ルール／カード一覧モーダル -->
   <div id="rules-modal" class="modal" hidden>
