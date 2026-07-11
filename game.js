@@ -132,7 +132,6 @@ function createGame(config) {
     id: i,
     name: name || `プレイヤー${i + 1}`,
     hand: [],
-    alive: true,
     safeguard: false,
   }));
 
@@ -162,18 +161,9 @@ function addLog(message, highlight) {
   state.log.push({ message, highlight: !!highlight });
 }
 
-function aliveCount() {
-  return state.players.filter((p) => p.alive).length;
-}
-
-function nextAliveIndex(fromIndex) {
+function nextIndex(fromIndex) {
   const n = state.players.length;
-  let i = fromIndex;
-  for (let step = 0; step < n; step++) {
-    i = (i + state.direction + n) % n;
-    if (state.players[i].alive) return i;
-  }
-  return fromIndex;
+  return (fromIndex + state.direction + n) % n;
 }
 
 function effectiveMaxAdvance() {
@@ -222,15 +212,8 @@ function advanceCount(amount) {
       endTurnAndAdvance();
       return;
     }
-    player.alive = false;
-    addLog(`${player.name} が上限の数(${state.limit})に到達し、脱落した!`, true);
-    state.count = 0;
-
-    if (aliveCount() <= 1) {
-      finishGame();
-      return;
-    }
-    endTurnAndAdvance();
+    addLog(`${player.name} が上限の数(${state.limit})に到達し、負けた!`, true);
+    finishGame(player);
     return;
   }
 
@@ -238,21 +221,23 @@ function advanceCount(amount) {
 }
 
 function endTurnAndAdvance() {
-  let next = nextAliveIndex(state.currentPlayerIndex);
+  let next = nextIndex(state.currentPlayerIndex);
   if (state.skipNext) {
     state.skipNext = false;
     addLog(`${state.players[next].name} の番はスキップされた。`, true);
-    next = nextAliveIndex(next);
+    next = nextIndex(next);
   }
   startTurn(next);
   showTransitionScreen();
 }
 
-function finishGame() {
-  const winner = state.players.find((p) => p.alive);
-  document.getElementById("result-title").textContent = winner
-    ? `${winner.name} の勝利!`
-    : "ゲーム終了";
+function finishGame(loser) {
+  const winners = state.players.filter((p) => p !== loser);
+  const title =
+    winners.length === 1
+      ? `${winners[0].name} の勝利!(${loser.name} の負け)`
+      : `${loser.name} の負け!(${winners.map((p) => p.name).join("・")} の勝ち)`;
+  document.getElementById("result-title").textContent = title;
   showScreen("result-screen");
 }
 
@@ -285,8 +270,7 @@ function render() {
   state.players.forEach((p, i) => {
     const chip = document.createElement("span");
     chip.className = "player-chip";
-    if (!p.alive) chip.classList.add("eliminated");
-    if (i === state.currentPlayerIndex && p.alive) chip.classList.add("current");
+    if (i === state.currentPlayerIndex) chip.classList.add("current");
     chip.textContent = `${p.name} (手札${p.hand.length}${p.safeguard ? " 🛡" : ""})`;
     overview.appendChild(chip);
   });

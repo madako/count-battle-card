@@ -204,10 +204,6 @@ body {
   border-color: var(--accent);
   color: var(--text);
 }
-.player-chip.eliminated {
-  text-decoration: line-through;
-  opacity: 0.45;
-}
 
 /* turn panel */
 .turn-panel {
