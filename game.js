@@ -7,16 +7,24 @@
 //   - category: "attack" ... 「攻撃」カード。対象プレイヤーへ不利な効果を与える
 //   - sub: 副効果タグの配列。"速攻" / "cha" / "enc" を指定できる
 //       速攻: 1ターン1枚の通常制限を無視して何枚でも使える
-//       cha : 自分のターンでなくても、他人がカードを使った直後に割り込んで使える
-//             (通常の手札クリックでは使えず、cha発動チャンスでのみ使用可)
-//       enc : 他のカードと同時に使うことでそのカードに変化を与える
-//             (通常の手札クリックでは使えず、他カード使用時の添付選択でのみ使用可)
+//       cha : 自分のターンでなくても、直前に場に出たカード(cha自身を含む)に
+//             割り込んで使える。通常の手札クリックでは使えず、
+//             cha発動チャンスでのみ使用可
+//       enc : 他のカードと同時に使うことでそのカードに変化を与える。
+//             1枚のカードに複数のencを添付でき、通常の手札クリックでは使えず、
+//             他カード使用時の添付選択でのみ使用可
 //   - needsTarget: true ... 使用時に対象プレイヤーを1人選ばせる
 //   - choices: [{key,label}, ...] ... 使用時に選択肢を選ばせる
 //   - peek: N ... 使用時に山札の上からN枚を見せて1枚選ばせる
-//   - magnitude: 数値効果の基準値。enc「up grade」で1.5倍(小数点切り捨て)される
-//   - encModify(context): enc カード専用。同時に使われたカードのcontextを書き換える
-//   - effect(state, playerIndex, context): 効果本体。ログに乗せる文字列を返す
+//   - magnitude: 数値効果の基準値。encの倍率がかかった上でcontext.magnitudeになる
+//   - encModify(context, count): enc カード専用。添付された枚数(count)を受け取り、
+//     同時に使われたカードのcontextを書き換える
+//   - chaCanRespond(pendingItem, responderIndex): cha カード専用(省略時は常に使用可)。
+//     場の一番上にあるカードに対して今このカードで割り込めるかを返す
+//   - chaResolve(stack, myIndex, actingPlayerIndex): cha カード専用。
+//     スタック解決時に呼ばれ、stack[myIndex-1](自分が割り込んだ相手)に効果を及ぼす
+//   - effect(state, playerIndex, context): 効果本体。ログに乗せる文字列を返す。
+//     cha付きカードは持たない(cha専用の解決はchaResolveで行う)
 // ---------------------------------------------------------------------------
 const CARD_TYPES = [
   {
@@ -78,8 +86,9 @@ const CARD_TYPES = [
   {
     id: "skip",
     name: "スキップ",
-    desc: "次のプレイヤーの番を1回とばす",
+    desc: "(速攻)次のプレイヤーの番を1回とばす",
     color: "#9b59b6",
+    sub: ["速攻"],
     effect(state) {
       state.skipNext = true;
       return "次のプレイヤーの番がスキップされる!";
@@ -135,6 +144,16 @@ const CARD_TYPES = [
     },
   },
   {
+    id: "pass",
+    name: "パス",
+    desc: "カウントを進めずに自分のターンを終える(例: 上限60・現在59など、進めると必ず負けてしまう時に有効)",
+    color: "#7f8c8d",
+    effect(state, playerIndex) {
+      state.turnEndedByPass = true;
+      return `${state.players[playerIndex].name}がターンをパスした。カウントは${state.count}のまま。`;
+    },
+  },
+  {
     id: "new_game",
     name: "強くてニューゲーム",
     desc: "カウントを0に戻し、手札をすべて山札に戻してシャッフルし、開始時の手札枚数+2枚を引き直す。さらに自分だけ最大カウント数が2倍になる",
@@ -161,8 +180,9 @@ const CARD_TYPES = [
   {
     id: "choose",
     name: "choose",
-    desc: "山札の上から5枚を見て、その中から好きな1枚を引く",
+    desc: "(速攻)山札の上から5枚を見て、その中から好きな1枚を引く",
     color: "#16a085",
+    sub: ["速攻"],
     peek: 5,
     effect(state, playerIndex, context) {
       const player = state.players[playerIndex];
@@ -195,39 +215,20 @@ const CARD_TYPES = [
     category: "attack",
     needsTarget: true,
     effect(state, playerIndex, context) {
-      let casterIndex = playerIndex;
       let targetIndex = context.targetIndex;
       if (targetIndex == null) {
-        const others = state.players.map((_, i) => i).filter((i) => i !== casterIndex);
+        const others = state.players.map((_, i) => i).filter((i) => i !== playerIndex);
         targetIndex = others[Math.floor(Math.random() * others.length)];
       }
+      const caster = state.players[playerIndex];
       const target = state.players[targetIndex];
-      if (target.reflect) {
-        target.reflect = false;
-        addLog(`${target.name}の「reflection」が発動し、効果が跳ね返った!`, true);
-        const tmp = casterIndex;
-        casterIndex = targetIndex;
-        targetIndex = tmp;
+      if (!target.hand.length) {
+        return `${target.name}の手札は空だったので何も奪えなかった。`;
       }
-      const caster = state.players[casterIndex];
-      const finalTarget = state.players[targetIndex];
-      if (!finalTarget.hand.length) {
-        return `${finalTarget.name}の手札は空だったので何も奪えなかった。`;
-      }
-      const stealIdx = Math.floor(Math.random() * finalTarget.hand.length);
-      const stolenId = finalTarget.hand.splice(stealIdx, 1)[0];
+      const stealIdx = Math.floor(Math.random() * target.hand.length);
+      const stolenId = target.hand.splice(stealIdx, 1)[0];
       caster.hand.push(stolenId);
-      return `${caster.name}が${finalTarget.name}から「${CARD_MAP[stolenId].name}」を奪った!`;
-    },
-  },
-  {
-    id: "reflection",
-    name: "reflection",
-    desc: "次に「攻撃」カードの対象になった時、その効果を発動者に跳ね返す(1回限り)",
-    color: "#7f8fa6",
-    effect(state, playerIndex) {
-      state.players[playerIndex].reflect = true;
-      return "「reflection」がセットされた。次の攻撃を跳ね返せる。";
+      return `${caster.name}が${target.name}から「${CARD_MAP[stolenId].name}」を奪った!`;
     },
   },
   {
@@ -246,12 +247,15 @@ const CARD_TYPES = [
   {
     id: "copy_card",
     name: "コピー",
-    desc: "直前に使われたカードの効果をもう一度発動する(コピー自身はコピーできない)",
+    desc: "直前に使われたカードの効果をもう一度発動する(コピー自身やcha・encのカードはコピーできない)",
     color: "#576574",
     effect(state, playerIndex) {
       const last = state.lastPlayedCard;
       if (!last || last.cardId === "copy_card") return "コピーできる効果がなかった。";
       const lastCard = CARD_MAP[last.cardId];
+      if (hasSub(lastCard, "cha") || hasSub(lastCard, "enc")) {
+        return "直前のカードはcha/encだったため、コピーできなかった。";
+      }
       const msg = runCardEffect(lastCard, playerIndex, {});
       return `「${lastCard.name}」の効果をコピーした。${msg}`;
     },
@@ -259,25 +263,64 @@ const CARD_TYPES = [
   {
     id: "cha_deny",
     name: "chaカード禁止",
-    desc: "(cha)相手が使ったカードの効果を打ち消す",
+    desc: "(cha)直前に場に出たカードの効果を打ち消す。打ち消しに打ち消しを使えば、無理やり通すこともできる",
     color: "#2c3e50",
     sub: ["cha"],
+    chaResolve(stack, myIndex) {
+      const target = stack[myIndex - 1];
+      if (!target) return "打ち消す対象がなかった。";
+      target.nullified = true;
+      return `「${CARD_MAP[target.cardId].name}」の効果を打ち消した。`;
+    },
   },
   {
     id: "cha_copy",
     name: "chaコピー",
-    desc: "(cha)相手が使ったカードの効果を自分にもコピーする",
+    desc: "(cha)直前に場に出たカードの効果を自分にもコピーする(cha付きカードにも使える)",
     color: "#34495e",
     sub: ["cha"],
+    chaResolve(stack, myIndex, actingPlayerIndex) {
+      const target = stack[myIndex - 1];
+      if (!target || target.nullified) return "コピーする対象がなかった。";
+      const targetCard = CARD_MAP[target.cardId];
+      if (hasSub(targetCard, "cha") && targetCard.chaResolve) {
+        return targetCard.chaResolve(stack, myIndex - 1, actingPlayerIndex);
+      }
+      const msg = runCardEffect(targetCard, actingPlayerIndex, Object.assign({}, target.context));
+      return `「${targetCard.name}」の効果を自分にもコピーした。${msg}`;
+    },
+  },
+  {
+    id: "reflection",
+    name: "reflection",
+    desc: "(cha)自分が「攻撃」カードの対象になった直後にだけ使え、その効果を発動者に跳ね返す",
+    color: "#7f8fa6",
+    sub: ["cha"],
+    chaCanRespond(pendingItem, responderIndex) {
+      const c = CARD_MAP[pendingItem.cardId];
+      return c.category === "attack" && pendingItem.context.targetIndex === responderIndex;
+    },
+    chaResolve(stack, myIndex) {
+      const target = stack[myIndex - 1];
+      if (!target) return "跳ね返す対象がなかった。";
+      const targetCard = CARD_MAP[target.cardId];
+      if (targetCard.category !== "attack") return "攻撃カードではなかったため何も起きなかった。";
+      const oldCaster = target.playerIndex;
+      const oldTarget = target.context.targetIndex;
+      target.playerIndex = oldTarget;
+      target.context.targetIndex = oldCaster;
+      return `「${targetCard.name}」の効果を跳ね返した!`;
+    },
   },
   {
     id: "up_grade",
     name: "up grade",
-    desc: "(enc)同時に使ったカードの数値効果を1.5倍(小数点切り捨て)にする",
+    desc: "(enc)同時に使ったカードの数値効果を変化させる(1枚添付で1.5倍、2枚以上は添付した枚数倍。小数点切り捨て)",
     color: "#d35400",
     sub: ["enc"],
-    encModify(context) {
-      context.encMultiply = (context.encMultiply || 1) * 1.5;
+    encModify(context, count) {
+      const factor = count === 1 ? 1.5 : count;
+      context.encMultiply = (context.encMultiply || 1) * factor;
     },
   },
   {
@@ -312,6 +355,15 @@ function runCardEffect(card, playerIndex, context) {
   return card.effect(state, playerIndex, context);
 }
 
+// enc カードが「速攻」を付与するかどうかを、実際にencModifyを試し撃ちして判定する
+// (idをハードコードせず、今後 forceSpeed を使う enc カードが増えても自動的に対応できるように)
+function encGrantsSpeed(encCard) {
+  if (!encCard.encModify) return false;
+  const testContext = {};
+  encCard.encModify(testContext, 1);
+  return testContext.forceSpeed === true;
+}
+
 // ---------------------------------------------------------------------------
 // ゲーム状態
 // ---------------------------------------------------------------------------
@@ -341,7 +393,6 @@ function createGame(config) {
     name: name || `プレイヤー${i + 1}`,
     hand: [],
     safeguard: false,
-    reflect: false,
     advanceMultiplier: 1,
   }));
 
@@ -367,9 +418,13 @@ function createGame(config) {
     graveyard: [],
     initialHandSize: config.handSize,
     cardsPlayedThisTurn: 0,
+    turnEndedByPass: false,
     lastPlayedCard: null,
     pendingPlay: null,
-    chaPhase: null,
+    chaStack: null,
+    chaQueue: null,
+    chaCurrentResponder: null,
+    chaAnyRevealed: false,
     log: [],
   };
 }
@@ -406,6 +461,26 @@ function startTurn(playerIndex) {
   }
 }
 
+// カードが「今この瞬間の自分の手札からは使えない」理由を返す(使えるなら null)。
+// 使えないカードは例外なくここで検出し、手札ではボタンを disabled にして表示する。
+function cardUnavailableReason(card, hand, index) {
+  if (hasSub(card, "cha")) {
+    return "相手(または自分)がカードを場に出した直後にのみ、割り込んで使えるカードです。";
+  }
+  if (hasSub(card, "enc")) {
+    return "他のカードを使う時に、同時に添付してのみ使えるカードです。";
+  }
+  if (!hasSub(card, "速攻") && state.cardsPlayedThisTurn > 0) {
+    const hasSpeedRescue = hand.some(
+      (id, i) => i !== index && hasSub(CARD_MAP[id], "enc") && encGrantsSpeed(CARD_MAP[id])
+    );
+    if (!hasSpeedRescue) {
+      return "このターンはすでに通常カードを使用済みです(speed upを同時に添付すれば使えます)。";
+    }
+  }
+  return null;
+}
+
 // ---------------------------------------------------------------------------
 // カード使用フロー(enc添付 → 対象選択 → 選択肢 → 山札を見て選ぶ → 解決)
 // 現在の手番のプレイヤー自身の操作なので、目隠し不要でその場のモーダルで進める。
@@ -425,11 +500,11 @@ function beginCardPlay(handIndex) {
   const player = state.players[state.currentPlayerIndex];
   const cardId = player.hand[handIndex];
   const card = CARD_MAP[cardId];
-  if (!card || !isDirectlyPlayable(card)) return;
+  if (!card || cardUnavailableReason(card, player.hand, handIndex)) return;
   state.pendingPlay = {
     handIndex,
     cardId,
-    encHandIndex: null,
+    encSelected: [],
     encAsked: false,
     targetIndex: null,
     choice: null,
@@ -482,8 +557,15 @@ function advancePlayFlow() {
   resolvePlayFlow();
 }
 
-function chooseEncForPlay(encIndex) {
-  state.pendingPlay.encHandIndex = encIndex;
+function toggleEncForPlay(encIndex) {
+  const pp = state.pendingPlay;
+  const i = pp.encSelected.indexOf(encIndex);
+  if (i === -1) pp.encSelected.push(encIndex);
+  else pp.encSelected.splice(i, 1);
+  render();
+}
+
+function confirmEncForPlay() {
   state.pendingPlay.encAsked = true;
   advancePlayFlow();
 }
@@ -514,6 +596,18 @@ function cancelPlayFlow() {
   render();
 }
 
+// 添付されたencカード群(同一idはまとめて枚数を渡す)をcontextに反映する
+function applyEncAttachments(encCards, context) {
+  const counts = {};
+  for (const c of encCards) counts[c.id] = (counts[c.id] || 0) + 1;
+  const applied = new Set();
+  for (const c of encCards) {
+    if (applied.has(c.id)) continue;
+    applied.add(c.id);
+    if (c.encModify) c.encModify(context, counts[c.id]);
+  }
+}
+
 function resolvePlayFlow() {
   const pp = state.pendingPlay;
   const player = state.players[state.currentPlayerIndex];
@@ -524,11 +618,8 @@ function resolvePlayFlow() {
   if (pp.choice != null) context.choice = pp.choice;
   if (pp.peeked != null) context.peeked = pp.peeked.slice();
 
-  let encCard = null;
-  if (pp.encHandIndex != null) {
-    encCard = CARD_MAP[player.hand[pp.encHandIndex]];
-  }
-  if (encCard) encCard.encModify(context);
+  const encCards = pp.encSelected.map((idx) => CARD_MAP[player.hand[idx]]);
+  applyEncAttachments(encCards, context);
 
   const isSpeedy = hasSub(card, "速攻") || context.forceSpeed === true;
   if (!isSpeedy && state.cardsPlayedThisTurn > 0) {
@@ -542,8 +633,7 @@ function resolvePlayFlow() {
     return;
   }
 
-  const indexesToRemove = [pp.handIndex];
-  if (pp.encHandIndex != null) indexesToRemove.push(pp.encHandIndex);
+  const indexesToRemove = [pp.handIndex, ...pp.encSelected];
   indexesToRemove.sort((a, b) => b - a);
   for (const idx of indexesToRemove) {
     const removedId = player.hand.splice(idx, 1)[0];
@@ -553,50 +643,59 @@ function resolvePlayFlow() {
   if (!isSpeedy) state.cardsPlayedThisTurn += 1;
 
   state.pendingPlay = null;
-  beginChaPhase(state.currentPlayerIndex, card, context);
+  beginChaPhase(card, state.currentPlayerIndex, context);
 }
 
 // ---------------------------------------------------------------------------
-// chaフェーズ: 他プレイヤーがcha付きカードで割り込めるかを、手番順に確認していく。
-// cha付きカードを持っていないプレイヤーは目隠し画面を出さず黙ってスキップする。
+// chaスタック: 場に出たカードに、cha付きカードで何度でも割り込める優先権システム。
+// 「chaカード禁止にchaカード禁止を使って無理やり通す」のような多重割り込みに
+// 対応するため、場札を配列(スタック)として扱い、最後に積まれたものへの割り込みを
+// 手番順に確認 → 誰も割り込まなくなったら、積まれた順とは逆(後入れ先出し)に解決する。
+// cha付きカードを持っていない/割り込めるカードがないプレイヤーは、目隠し画面を
+// 出さず黙ってスキップする。
 // ---------------------------------------------------------------------------
-function beginChaPhase(hostPlayerIndex, card, context) {
+function buildResponseQueue(fromIndex) {
   const queue = [];
-  let idx = hostPlayerIndex;
+  let idx = fromIndex;
   for (let i = 0; i < state.players.length - 1; i++) {
     idx = nextIndex(idx);
     queue.push(idx);
   }
-  state.chaPhase = {
-    hostPlayerIndex,
-    cardId: card.id,
-    context,
-    queue,
-    nullified: false,
-    copiers: [],
-    currentResponder: null,
-    anyRevealed: false,
-  };
-  advanceChaPhase();
+  return queue;
 }
 
-function advanceChaPhase() {
-  const phase = state.chaPhase;
-  if (!phase) return;
-  while (phase.queue.length) {
-    const responder = phase.queue.shift();
-    const hasChaCard = state.players[responder].hand.some((id) => hasSub(CARD_MAP[id], "cha"));
-    if (hasChaCard) {
-      phase.currentResponder = responder;
-      phase.anyRevealed = true;
-      showChaTransitionScreen(responder);
-      return;
+function eligibleChaCards(responder, pendingItem) {
+  const player = state.players[responder];
+  return player.hand
+    .map((id, idx) => ({ idx, card: CARD_MAP[id] }))
+    .filter(({ card }) => hasSub(card, "cha"))
+    .filter(({ card }) => !card.chaCanRespond || card.chaCanRespond(pendingItem, responder));
+}
+
+function beginChaPhase(card, playerIndex, context) {
+  state.chaStack = [{ cardId: card.id, playerIndex, context, nullified: false }];
+  state.chaQueue = buildResponseQueue(playerIndex);
+  state.chaAnyRevealed = false;
+  advanceChaBuilding();
+}
+
+function advanceChaBuilding() {
+  while (state.chaQueue.length) {
+    const responder = state.chaQueue[0];
+    const hasAnyChaCard = state.players[responder].hand.some((id) => hasSub(CARD_MAP[id], "cha"));
+    if (!hasAnyChaCard) {
+      state.chaQueue.shift();
+      continue;
     }
+    state.chaCurrentResponder = responder;
+    showChaTransitionScreen(responder);
+    return;
   }
-  finishChaPhase();
+  resolveChaStack();
 }
 
 function showChaTransitionScreen(responder) {
+  state.chaAnyRevealed = true;
   const player = state.players[responder];
   document.getElementById("cha-transition-player-name").textContent = player.name;
   showScreen("cha-transition-screen");
@@ -608,79 +707,89 @@ function revealChaResponse() {
 }
 
 function renderChaResponseScreen() {
-  const phase = state.chaPhase;
-  const responder = phase.currentResponder;
+  const responder = state.chaCurrentResponder;
   const player = state.players[responder];
-  const hostCard = CARD_MAP[phase.cardId];
+  const top = state.chaStack[state.chaStack.length - 1];
+  const topCard = CARD_MAP[top.cardId];
 
   document.getElementById("cha-response-player-name").textContent = player.name;
   document.getElementById("cha-response-host-card").textContent =
-    `${state.players[phase.hostPlayerIndex].name}が「${hostCard.name}」を使用!割り込みますか?`;
+    `${state.players[top.playerIndex].name}が「${topCard.name}」を使用!割り込みますか?`;
 
   const area = document.getElementById("cha-response-cards");
   area.innerHTML = "";
   player.hand.forEach((cardId, idx) => {
     const c = CARD_MAP[cardId];
     if (!hasSub(c, "cha")) return;
+    const usable = !c.chaCanRespond || c.chaCanRespond(top, responder);
     const btn = document.createElement("button");
     btn.className = "card-btn";
     btn.style.background = c.color;
     btn.type = "button";
     btn.innerHTML = `<span class="card-name">${c.name}</span><span class="card-desc">${c.desc}</span>`;
-    btn.addEventListener("click", () => playChaResponse(idx));
+    if (usable) {
+      btn.addEventListener("click", () => playChaResponse(idx));
+    } else {
+      btn.disabled = true;
+      btn.title = "今の場札には割り込めません。";
+    }
     area.appendChild(btn);
   });
 }
 
 function playChaResponse(handIndex) {
-  const phase = state.chaPhase;
-  const responder = phase.currentResponder;
+  const responder = state.chaCurrentResponder;
   const player = state.players[responder];
   const cardId = player.hand.splice(handIndex, 1)[0];
   moveToGraveyard(cardId);
-  const card = CARD_MAP[cardId];
-  const hostCard = CARD_MAP[phase.cardId];
-
-  if (card.id === "cha_deny") {
-    phase.nullified = true;
-    addLog(`${player.name}が「${card.name}」で${state.players[phase.hostPlayerIndex].name}の「${hostCard.name}」を打ち消した!`, true);
-  } else if (card.id === "cha_copy") {
-    phase.copiers.push(responder);
-    addLog(`${player.name}が「${card.name}」で「${hostCard.name}」の効果を自分にもコピーする!`, true);
-  }
-
-  passChaResponse();
+  state.chaStack.push({ cardId, playerIndex: responder, context: {}, nullified: false });
+  addLog(`${player.name}が「${CARD_MAP[cardId].name}」で割り込んだ!`, true);
+  // 新しく場札が積まれたので、その1枚に対する割り込みチャンスを全員分やり直す
+  state.chaQueue = buildResponseQueue(responder);
+  advanceChaBuilding();
 }
 
 function passChaResponse() {
-  state.chaPhase.currentResponder = null;
-  advanceChaPhase();
+  state.chaQueue.shift();
+  state.chaCurrentResponder = null;
+  advanceChaBuilding();
 }
 
-function finishChaPhase() {
-  const phase = state.chaPhase;
-  const hostCard = CARD_MAP[phase.cardId];
-  const hostIndex = phase.hostPlayerIndex;
+function resolveChaStack() {
+  const stack = state.chaStack;
+  const originalHostIndex = stack[0].playerIndex;
 
-  if (phase.nullified) {
-    addLog(`「${hostCard.name}」の効果は打ち消されて発動しなかった。`, true);
-  } else {
-    const msg = runCardEffect(hostCard, hostIndex, phase.context);
-    addLog(`${state.players[hostIndex].name}が「${hostCard.name}」を使った。${msg}`);
+  for (let i = stack.length - 1; i >= 0; i--) {
+    const item = stack[i];
+    const card = CARD_MAP[item.cardId];
+    if (item.nullified) {
+      addLog(`「${card.name}」の効果は打ち消されて発動しなかった。`, true);
+      continue;
+    }
+    if (hasSub(card, "cha") && card.chaResolve) {
+      const msg = card.chaResolve(stack, i, item.playerIndex);
+      if (msg) addLog(`${state.players[item.playerIndex].name}の「${card.name}」: ${msg}`, true);
+    } else if (!hasSub(card, "cha")) {
+      const msg = runCardEffect(card, item.playerIndex, item.context);
+      addLog(`${state.players[item.playerIndex].name}が「${card.name}」を使った。${msg}`);
+    }
   }
 
-  for (const copierIndex of phase.copiers) {
-    const copyContext = Object.assign({}, phase.context);
-    const msg = runCardEffect(hostCard, copierIndex, copyContext);
-    addLog(`${state.players[copierIndex].name}にも「${hostCard.name}」の効果がコピーされた。${msg}`);
-  }
+  state.lastPlayedCard = { cardId: stack[0].cardId, playerIndex: stack[0].playerIndex };
+  const wasRevealed = state.chaAnyRevealed;
+  state.chaStack = null;
+  state.chaQueue = null;
+  state.chaCurrentResponder = null;
+  state.chaAnyRevealed = false;
 
-  state.lastPlayedCard = { cardId: hostCard.id, playerIndex: hostIndex };
-  const wasRevealed = phase.anyRevealed;
-  state.chaPhase = null;
+  if (state.turnEndedByPass) {
+    state.turnEndedByPass = false;
+    endTurnAndAdvance();
+    return;
+  }
 
   if (wasRevealed) {
-    document.getElementById("transition-player-name").textContent = state.players[hostIndex].name;
+    document.getElementById("transition-player-name").textContent = state.players[originalHostIndex].name;
     showScreen("transition-screen");
   } else {
     render();
@@ -771,7 +880,7 @@ function render() {
     const chip = document.createElement("span");
     chip.className = "player-chip";
     if (i === state.currentPlayerIndex) chip.classList.add("current");
-    chip.textContent = `${p.name} (手札${p.hand.length}${p.safeguard ? " 🛡" : ""}${p.reflect ? " 🪞" : ""})`;
+    chip.textContent = `${p.name} (手札${p.hand.length}${p.safeguard ? " 🛡" : ""})`;
     overview.appendChild(chip);
   });
 
@@ -789,16 +898,18 @@ function render() {
       btn.className = "card-btn";
       btn.style.background = card.color;
       btn.type = "button";
-      const tag = card.category === "attack" ? " [攻撃]" : hasSub(card, "enc") ? " [enc]" : hasSub(card, "cha") ? " [cha]" : "";
+      const tag =
+        card.category === "attack" ? " [攻撃]" :
+        hasSub(card, "enc") ? " [enc]" :
+        hasSub(card, "cha") ? " [cha]" :
+        hasSub(card, "速攻") ? " [速攻]" : "";
       btn.innerHTML = `<span class="card-name">${card.name}${tag}</span><span class="card-desc">${card.desc}</span>`;
-      if (isDirectlyPlayable(card)) {
-        btn.addEventListener("click", () => beginCardPlay(idx));
+      const reason = cardUnavailableReason(card, player.hand, idx);
+      if (reason) {
+        btn.disabled = true;
+        btn.title = reason;
       } else {
-        btn.classList.add("card-btn-locked");
-        btn.addEventListener("click", () => {
-          addLog(`「${card.name}」は他のカードと同時に使う(enc)か、相手のカード使用時に割り込む(cha)専用のカードです。`, true);
-          render();
-        });
+        btn.addEventListener("click", () => beginCardPlay(idx));
       }
       handArea.appendChild(btn);
     });
@@ -850,24 +961,25 @@ function renderPlayModal() {
 
   if (pp.step === "enc") {
     const desc = document.createElement("p");
-    desc.textContent = "同時に使う enc カードを選べます(選ばなくてもOK)。";
+    desc.textContent = "同時に使う enc カードを選べます(複数選択可・選ばなくてもOK)。";
     body.appendChild(desc);
     eligibleEncIndexes().forEach((idx) => {
       const c = CARD_MAP[state.players[state.currentPlayerIndex].hand[idx]];
+      const selected = pp.encSelected.includes(idx);
       const btn = document.createElement("button");
-      btn.className = "card-btn";
+      btn.className = "card-btn" + (selected ? " card-btn-selected" : "");
       btn.style.background = c.color;
       btn.type = "button";
-      btn.innerHTML = `<span class="card-name">${c.name}</span><span class="card-desc">${c.desc}</span>`;
-      btn.addEventListener("click", () => chooseEncForPlay(idx));
+      btn.innerHTML = `<span class="card-name">${c.name}${selected ? " ✓選択中" : ""}</span><span class="card-desc">${c.desc}</span>`;
+      btn.addEventListener("click", () => toggleEncForPlay(idx));
       body.appendChild(btn);
     });
-    const skipBtn = document.createElement("button");
-    skipBtn.className = "secondary-btn";
-    skipBtn.type = "button";
-    skipBtn.textContent = "つけずに使う";
-    skipBtn.addEventListener("click", () => chooseEncForPlay(null));
-    body.appendChild(skipBtn);
+    const confirmBtn = document.createElement("button");
+    confirmBtn.className = "primary-btn";
+    confirmBtn.type = "button";
+    confirmBtn.textContent = pp.encSelected.length ? `${pp.encSelected.length}枚つけて使う` : "つけずに使う";
+    confirmBtn.addEventListener("click", confirmEncForPlay);
+    body.appendChild(confirmBtn);
   } else if (pp.step === "target") {
     const desc = document.createElement("p");
     desc.textContent = "対象のプレイヤーを選んでください。";
