@@ -262,11 +262,9 @@ body {
   cursor: not-allowed;
 }
 
-.card-btn-locked {
-  opacity: 0.55;
-}
-.card-btn-locked:hover {
-  transform: none;
+.card-btn-selected {
+  outline: 3px solid var(--accent-2);
+  outline-offset: -3px;
 }
 
 .hand-empty {
