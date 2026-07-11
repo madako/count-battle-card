@@ -262,9 +262,52 @@ body {
   cursor: not-allowed;
 }
 
+.card-btn-locked {
+  opacity: 0.55;
+}
+.card-btn-locked:hover {
+  transform: none;
+}
+
 .hand-empty {
   color: var(--muted);
   font-size: 0.85rem;
+}
+
+.secondary-btn {
+  display: block;
+  width: 100%;
+  padding: 10px 14px;
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid #444a5e;
+  border-radius: 8px;
+  cursor: pointer;
+  margin-top: 12px;
+  font-size: 0.95rem;
+}
+.secondary-btn:hover {
+  border-color: var(--accent-2);
+  color: var(--accent-2);
+}
+
+.cha-host-info {
+  color: var(--accent);
+  font-weight: bold;
+  margin-bottom: 4px;
+}
+
+#play-modal-body h3 {
+  margin-top: 0;
+  color: var(--accent);
+}
+#play-modal-body p {
+  color: var(--muted);
+  margin-bottom: 12px;
+}
+#play-modal-body .card-btn,
+#play-modal-body .move-btn {
+  margin-bottom: 8px;
 }
 
 .move-area {
