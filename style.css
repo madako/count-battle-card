@@ -250,7 +250,7 @@ body {
 }
 
 .card-btn {
-  width: 130px;
+  width: 160px;
   min-height: 100px;
   border-radius: 10px;
   border: none;
@@ -299,10 +299,12 @@ body {
   pointer-events: none;
 }
 
-/* カードイラスト表示エリア(assets/cards/<id>.png があれば埋め込まれる。無ければDOMごと外れる) */
+/* カードイラスト表示エリア(assets/cards/<id>.png があれば埋め込まれる。無ければDOMごと外れる)
+   object-fit: contain にしているのは、イラストの縦横比が将来PNGに差し替わっても
+   (SVGアイコンの2:1と揃っていなくても)欠けずに全体が見えるようにするため */
 .card-visual {
   width: 100%;
-  height: 64px;
+  height: 120px;
   border-radius: 6px;
   overflow: hidden;
   margin-bottom: 6px;
@@ -311,11 +313,11 @@ body {
 .card-visual img {
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
   display: block;
 }
 .rules-card-list .card-visual {
-  height: 80px;
+  height: 150px;
 }
 
 .card-btn-selected {
@@ -390,6 +392,99 @@ body {
 .move-btn.danger {
   background: var(--danger);
   color: #2b0d0d;
+}
+
+/* カウント推移グラフ */
+.chart-section h3 {
+  color: var(--muted);
+  font-size: 0.9rem;
+  margin-bottom: 8px;
+}
+.count-chart-wrap {
+  position: relative;
+  background: var(--panel-2);
+  border-radius: 10px;
+  padding: 10px 8px 4px;
+}
+.count-chart {
+  display: block;
+  width: 100%;
+  height: 160px;
+}
+.count-chart .chart-grid-line {
+  stroke: rgba(240, 242, 248, 0.08);
+  stroke-width: 1;
+}
+.count-chart .chart-axis-label {
+  fill: var(--muted);
+  font-size: 10px;
+}
+.count-chart .chart-limit-line {
+  stroke: var(--danger);
+  stroke-width: 2;
+  stroke-dasharray: 5 4;
+}
+.count-chart .chart-limit-label {
+  fill: var(--danger);
+  font-size: 10px;
+  font-weight: bold;
+}
+.count-chart .chart-line {
+  fill: none;
+  stroke: var(--accent-2);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+.count-chart .chart-area {
+  fill: var(--accent-2);
+  opacity: 0.12;
+}
+.count-chart .chart-point-hit {
+  fill: transparent;
+  cursor: pointer;
+}
+.count-chart .chart-point {
+  stroke: var(--panel-2);
+  stroke-width: 1.5;
+  pointer-events: none;
+}
+.count-chart .chart-point-value {
+  fill: var(--text);
+  font-size: 11px;
+  font-weight: bold;
+  pointer-events: none;
+}
+.chart-tooltip {
+  position: absolute;
+  transform: translate(-50%, -125%);
+  background: var(--panel);
+  border: 1px solid var(--accent-2);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 0.75rem;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 5;
+}
+.chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin-top: 8px;
+}
+.chart-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+.chart-legend-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  flex-shrink: 0;
 }
 
 .log-section h3 {

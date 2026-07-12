@@ -80,6 +80,7 @@ const CARD_TYPES = [
       const sign = context.choice === "minus" ? -1 : 1;
       const before = state.count;
       state.count = Math.max(0, state.count + sign * mag);
+      recordCountHistory(playerIndex);
       return `カウントが ${before} → ${state.count} に変化した!`;
     },
   },
@@ -162,6 +163,7 @@ const CARD_TYPES = [
       const player = state.players[playerIndex];
       const before = state.count;
       state.count = 0;
+      recordCountHistory(playerIndex);
       state.deck.push(...player.hand);
       player.hand = [];
       state.deck = shuffle(state.deck);
@@ -484,7 +486,18 @@ function createGame(config) {
     chaCurrentResponder: null,
     chaAnyRevealed: false,
     log: [],
+    countHistory: [{ index: 0, count: 0, playerIndex: null }],
   };
+}
+
+// カウントの推移グラフ用の記録。state.count を意図的に変更する箇所(advanceCount、
+// タイムトリック、強くてニューゲームなど)から、変更後に呼び出す。
+function recordCountHistory(playerIndex) {
+  state.countHistory.push({
+    index: state.countHistory.length,
+    count: state.count,
+    playerIndex,
+  });
 }
 
 function addLog(message, highlight) {
@@ -864,6 +877,7 @@ function advanceCount(amount) {
   const player = state.players[state.currentPlayerIndex];
   const newCount = state.count + amount;
   state.count = newCount;
+  recordCountHistory(state.currentPlayerIndex);
 
   const nums =
     amount === 1
@@ -875,6 +889,7 @@ function advanceCount(amount) {
     if (player.safeguard) {
       player.safeguard = false;
       state.count = 0;
+      recordCountHistory(state.currentPlayerIndex);
       addLog(`${player.name} は上限に到達したが「まもり」で回避!カウントは0に戻った。`, true);
       endTurnAndAdvance();
       return;
@@ -923,6 +938,164 @@ function showTransitionScreen() {
   const player = state.players[state.currentPlayerIndex];
   document.getElementById("transition-player-name").textContent = player.name;
   showScreen("transition-screen");
+}
+
+// ---------------------------------------------------------------------------
+// カウント推移グラフ(ライブラリは使わずSVGを直接組み立てる)
+// ---------------------------------------------------------------------------
+// プレイヤーごとの識別色(最大6人分。ダークテーマ向けに検証済みのカテゴリカル配色を
+// 固定順で割り当てる。4番目の緑は背景とのコントラストが低めなので、凡例と
+// ツールチップの文字ラベルで補っている=色だけに意味を持たせない)
+const PLAYER_CHART_COLORS = ["#3987e5", "#199e70", "#c98500", "#008300", "#9085e9", "#e66767"];
+
+function hideChartTooltip() {
+  document.getElementById("count-chart-tooltip").hidden = true;
+}
+
+function showChartTooltip(anchorEl, text) {
+  const wrap = document.getElementById("count-chart-wrap");
+  const tip = document.getElementById("count-chart-tooltip");
+  const wrapRect = wrap.getBoundingClientRect();
+  const anchorRect = anchorEl.getBoundingClientRect();
+  tip.textContent = text;
+  tip.hidden = false;
+  tip.style.left = `${anchorRect.left - wrapRect.left + anchorRect.width / 2}px`;
+  tip.style.top = `${anchorRect.top - wrapRect.top}px`;
+}
+
+function renderChartLegend() {
+  const legend = document.getElementById("count-chart-legend");
+  legend.innerHTML = "";
+  state.players.forEach((p, i) => {
+    const item = document.createElement("span");
+    item.className = "chart-legend-item";
+    const swatch = document.createElement("span");
+    swatch.className = "chart-legend-swatch";
+    swatch.style.background = PLAYER_CHART_COLORS[i % PLAYER_CHART_COLORS.length];
+    item.appendChild(swatch);
+    item.appendChild(document.createTextNode(p.name));
+    legend.appendChild(item);
+  });
+}
+
+function renderCountChart() {
+  const svgNS = "http://www.w3.org/2000/svg";
+  const svg = document.getElementById("count-chart");
+  svg.innerHTML = "";
+  hideChartTooltip();
+  renderChartLegend();
+
+  const wrap = document.getElementById("count-chart-wrap");
+  const width = Math.max(280, wrap.clientWidth - 16);
+  const height = 160;
+  const padLeft = 28;
+  const padRight = 16;
+  const padTop = 14;
+  const padBottom = 8;
+  svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+
+  const history = state.countHistory;
+  const limit = state.limit;
+  const plotW = width - padLeft - padRight;
+  const plotH = height - padTop - padBottom;
+  const maxIndex = Math.max(1, history.length - 1);
+
+  const xOf = (i) => padLeft + (plotW * i) / maxIndex;
+  const yOf = (count) => padTop + plotH - (plotH * Math.min(count, limit)) / limit;
+
+  // 目盛り線(0 / 上限の半分 / 上限)
+  [0, limit / 2, limit].forEach((v) => {
+    const y = yOf(v);
+    const line = document.createElementNS(svgNS, "line");
+    line.setAttribute("class", "chart-grid-line");
+    line.setAttribute("x1", padLeft);
+    line.setAttribute("x2", width - padRight);
+    line.setAttribute("y1", y);
+    line.setAttribute("y2", y);
+    svg.appendChild(line);
+
+    const label = document.createElementNS(svgNS, "text");
+    label.setAttribute("class", "chart-axis-label");
+    label.setAttribute("x", 2);
+    label.setAttribute("y", y + 3);
+    label.textContent = Math.round(v);
+    svg.appendChild(label);
+  });
+
+  // 上限ライン(点線・危険ラインとして常に表示)
+  const limitY = yOf(limit);
+  const limitLine = document.createElementNS(svgNS, "line");
+  limitLine.setAttribute("class", "chart-limit-line");
+  limitLine.setAttribute("x1", padLeft);
+  limitLine.setAttribute("x2", width - padRight);
+  limitLine.setAttribute("y1", limitY);
+  limitLine.setAttribute("y2", limitY);
+  svg.appendChild(limitLine);
+
+  const limitLabel = document.createElementNS(svgNS, "text");
+  limitLabel.setAttribute("class", "chart-limit-label");
+  limitLabel.setAttribute("x", width - padRight);
+  limitLabel.setAttribute("y", limitY - 4);
+  limitLabel.setAttribute("text-anchor", "end");
+  limitLabel.textContent = `上限 ${limit}`;
+  svg.appendChild(limitLabel);
+
+  if (history.length < 2) {
+    return; // まだ1手も進んでいない: 線・点は無しでグリッドだけ表示
+  }
+
+  const points = history.map((h) => [xOf(h.index), yOf(h.count)]);
+
+  const line = document.createElementNS(svgNS, "polyline");
+  line.setAttribute("class", "chart-line");
+  line.setAttribute("points", points.map((p) => p.join(",")).join(" "));
+  svg.appendChild(line);
+
+  const baseline = padTop + plotH;
+  const area = document.createElementNS(svgNS, "polygon");
+  area.setAttribute("class", "chart-area");
+  area.setAttribute(
+    "points",
+    `${points[0][0]},${baseline} ${points.map((p) => p.join(",")).join(" ")} ${points[points.length - 1][0]},${baseline}`
+  );
+  svg.appendChild(area);
+
+  // 各点(起点=index0は誰の手番でもないので打たない)。ホバーでプレイヤー名と数値を表示
+  history.forEach((h, i) => {
+    if (h.playerIndex == null) return;
+    const [x, y] = points[i];
+    const color = PLAYER_CHART_COLORS[h.playerIndex % PLAYER_CHART_COLORS.length];
+    const player = state.players[h.playerIndex];
+    const isLast = i === history.length - 1;
+
+    const hit = document.createElementNS(svgNS, "circle");
+    hit.setAttribute("class", "chart-point-hit");
+    hit.setAttribute("cx", x);
+    hit.setAttribute("cy", y);
+    hit.setAttribute("r", 10);
+    hit.addEventListener("mouseenter", () => showChartTooltip(hit, `${player.name}: ${h.count}`));
+    hit.addEventListener("mouseleave", hideChartTooltip);
+    svg.appendChild(hit);
+
+    const dot = document.createElementNS(svgNS, "circle");
+    dot.setAttribute("class", "chart-point");
+    dot.setAttribute("cx", x);
+    dot.setAttribute("cy", y);
+    dot.setAttribute("r", isLast ? 5 : 4);
+    dot.setAttribute("fill", color);
+    svg.appendChild(dot);
+  });
+
+  // 直近の値だけ直接ラベル表示(全点にラベルを付けると煩雑になるため)
+  const last = points[points.length - 1];
+  const nearRightEdge = last[0] + 8 > width - padRight - 4;
+  const lastValue = document.createElementNS(svgNS, "text");
+  lastValue.setAttribute("class", "chart-point-value");
+  lastValue.setAttribute("x", nearRightEdge ? last[0] - 8 : last[0] + 8);
+  lastValue.setAttribute("y", last[1] - 8);
+  lastValue.setAttribute("text-anchor", nearRightEdge ? "end" : "start");
+  lastValue.textContent = history[history.length - 1].count;
+  svg.appendChild(lastValue);
 }
 
 function render() {
@@ -1007,6 +1180,7 @@ function render() {
     logArea.appendChild(p);
   }
 
+  renderCountChart();
   renderPlayModal();
 }
 
