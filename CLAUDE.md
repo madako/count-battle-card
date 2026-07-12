@@ -62,3 +62,19 @@ After all that, the player can still act again (more 速攻 cards, or `advanceCo
 `showScreen(id)` toggles `.screen` elements' `hidden` attribute and — as a side effect — always force-hides `#play-modal`, since that modal is a non-`.screen` overlay that must never survive a screen switch (e.g. into a cha-response screen) or it'll block input. Screens: `setup-screen`, `transition-screen` (turn handoff, also reused to resume the acting player after a cha phase), `cha-transition-screen` / `cha-response-screen` (cha interrupt handoff — reusable for any stack depth, not just the first interrupt), `game-screen`, `result-screen`, plus the `rules-modal` and `play-modal` overlays. All DOM ids referenced in `game.js` must exist in `index.html`.
 
 When adding a new card effect, add an entry to `CARD_TYPES` with a unique `id` and an `effect` (or, for cha cards, `chaResolve`) function; avoid adding new global state fields unless the effect genuinely needs to persist across turns. Reuse the existing `category`/`sub`/`needsTarget`/`choices`/`peek`/`magnitude`/`encModify`/`chaCanRespond`/`chaResolve` mechanisms before inventing new ones — most new attack/enc/cha cards should fit the existing pipeline without touching `resolvePlayFlow`/`beginChaPhase`/`resolveChaStack`.
+
+### Card illustrations
+
+Card thumbnails are convention-based, not declared per-card: `buildCardVisual(cardId)` always points an `<img>` at `assets/cards/<id>.png`; if that file 404s, the `error` handler removes the element and the card silently falls back to its plain color background (today's look). There is no field on `CARD_TYPES` for this and none is needed — dropping a correctly-named PNG into `assets/cards/` is enough to make it appear everywhere that card is rendered (hand, cha-response, enc/peek picker, rules modal), since they all route through the shared `buildCardBody()` helper. See `assets/cards/README.md` for the naming list and size guidance (used as a prompt sheet for generating the art externally).
+
+### Animation
+
+Animations are plain CSS (`style.css`), triggered by class toggles in `game.js`, with no animation library or FLIP-style diffing — consistent with the rest of the project having no dependencies. Three mechanisms:
+
+- **Screen transitions**: `.screen:not([hidden])` always plays `screenEnter` — since toggling the `hidden` attribute flips `display: none` → `block`, the browser restarts the animation on every `showScreen()` call for free, no JS hook needed.
+- **Card entrance**: `.card-btn` always plays `cardEnter`; every call site that builds a list of card buttons (hand, cha-response, enc picker, peek picker, rules modal) sets `btn.style.animationDelay` from its loop index to stagger them. Because `render()` rebuilds these lists from scratch every time, the animation replays automatically on every re-render — this is a feature, not a workaround.
+- **Card play feedback**: clicking a directly-playable card button (or a peek/cha-response card) never calls its handler synchronously — it goes through `triggerCardPlayAnimation(btn, onDone)`, which disables the button, adds `.card-playing` (plays `cardPlayPop`), and calls `onDone` after the animation's fixed 200ms via `setTimeout`. This is the one place where a card's *actual* effect is deliberately delayed past the click; keep that delay in sync with `cardPlayPop`'s duration in `style.css` if you change either.
+
+`#current-count` also gets a one-off `count-pulse` class (via the `pulseElement()` reflow-retrigger helper) whenever `render()` sees `state.count` differ from the last render, tracked in the module-level `lastRenderedCount` (reset to `null` on `startGame()` so a fresh game doesn't pulse on its first paint).
+
+All of the above respect `prefers-reduced-motion: reduce` (animations are disabled outright, not shortened) — keep new animations inside that media query too.
