@@ -345,18 +345,29 @@ function isDirectlyPlayable(card) {
   return !hasSub(card, "enc") && !hasSub(card, "cha");
 }
 
-// カードイラスト表示規約: assets/cards/<id>.png があればサムネイルとして表示する。
-// ファイルが無い/読み込みに失敗した場合は静かに諦めて、従来通り色背景のみの見た目に
-// フォールバックする(イラスト未生成のカードも今まで通り動く)。
+// カードイラスト表示規約: assets/cards/<id>.png → assets/cards/<id>.svg の順で探し、
+// 見つかった方をサムネイルとして表示する(PNGを優先することで、後から本物のイラストを
+// 同じidのPNGとして置くだけでSVGの仮絵を上書きできる=差し替えが容易)。
+// どちらも無い/読み込みに失敗した場合は静かに諦めて、従来通り色背景のみの見た目に
+// フォールバックする。
 function buildCardVisual(cardId) {
   const visual = document.createElement("div");
   visual.className = "card-visual";
   const img = document.createElement("img");
-  img.src = `assets/cards/${cardId}.png`;
   img.alt = "";
   img.loading = "lazy";
-  img.addEventListener("error", () => visual.remove(), { once: true });
+  const candidates = [`assets/cards/${cardId}.png`, `assets/cards/${cardId}.svg`];
+  let nextIndex = 0;
+  const tryNext = () => {
+    if (nextIndex >= candidates.length) {
+      visual.remove();
+      return;
+    }
+    img.src = candidates[nextIndex++];
+  };
+  img.addEventListener("error", tryNext);
   visual.appendChild(img);
+  tryNext();
   return visual;
 }
 
