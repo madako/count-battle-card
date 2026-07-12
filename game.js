@@ -1173,6 +1173,36 @@ function renderRulesModal() {
 }
 
 // ---------------------------------------------------------------------------
+// 動作確認ツール(URLに ?debug を付けた時だけ表示。新しいカードを実際に手札に
+// 入れて挙動を確かめられる。詳しくは CARD_GUIDE.md を参照)
+// ---------------------------------------------------------------------------
+const DEBUG_MODE = new URLSearchParams(location.search).has("debug");
+
+function setupDebugPanel() {
+  const panel = document.getElementById("debug-panel");
+  panel.hidden = !DEBUG_MODE;
+  if (!DEBUG_MODE) return;
+
+  const select = document.getElementById("debug-card-select");
+  CARD_TYPES.forEach((card) => {
+    const opt = document.createElement("option");
+    opt.value = card.id;
+    opt.textContent = `${card.name} (${card.id})`;
+    select.appendChild(opt);
+  });
+}
+
+function debugGiveSelectedCard() {
+  if (!state) return;
+  const cardId = document.getElementById("debug-card-select").value;
+  if (!cardId || !CARD_MAP[cardId]) return;
+  const player = state.players[state.currentPlayerIndex];
+  player.hand.push(cardId);
+  addLog(`[動作確認] ${player.name}の手札に「${CARD_MAP[cardId].name}」を追加した。`, true);
+  render();
+}
+
+// ---------------------------------------------------------------------------
 // イベント登録
 // ---------------------------------------------------------------------------
 document.getElementById("player-count").addEventListener("input", renderPlayerNameFields);
@@ -1201,9 +1231,12 @@ document.getElementById("rules-modal").addEventListener("click", (e) => {
 document.getElementById("cha-reveal-btn").addEventListener("click", revealChaResponse);
 document.getElementById("cha-pass-btn").addEventListener("click", passChaResponse);
 
+document.getElementById("debug-give-card-btn").addEventListener("click", debugGiveSelectedCard);
+
 // ---------------------------------------------------------------------------
 // 初期化
 // ---------------------------------------------------------------------------
 renderPlayerNameFields();
 renderRulesModal();
+setupDebugPanel();
 showScreen("setup-screen");

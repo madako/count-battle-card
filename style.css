@@ -415,6 +415,29 @@ body {
   font-weight: bold;
 }
 
+/* 動作確認ツール(?debug 時のみ表示) */
+.debug-panel {
+  margin-top: 16px;
+  padding: 12px 14px;
+  border: 1px dashed var(--muted);
+  border-radius: 10px;
+}
+.debug-panel summary {
+  cursor: pointer;
+  color: var(--accent-2);
+  font-size: 0.9rem;
+}
+.debug-panel .field-row {
+  margin-top: 10px;
+}
+.debug-panel select {
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid #444a5e;
+  background: var(--panel-2);
+  color: var(--text);
+}
+
 /* result screen */
 #result-screen {
   text-align: center;
