@@ -106,6 +106,16 @@
       <h3>ログ</h3>
       <div id="log-area" class="log-area"></div>
     </div>
+
+    <!-- 新しいカードの動作確認用。URLに ?debug を付けた時だけ表示される(CARD_GUIDE.md 参照) -->
+    <details id="debug-panel" class="debug-panel" hidden>
+      <summary>🛠 動作確認ツール(今の手番の手札に好きなカードを追加)</summary>
+      <div class="field-row">
+        <label for="debug-card-select">追加するカード</label>
+        <select id="debug-card-select"></select>
+      </div>
+      <button id="debug-give-card-btn" class="secondary-btn" type="button">手札に追加する</button>
+    </details>
   </section>
 
   <!-- 結果画面 -->

@@ -69,6 +69,15 @@ body {
   box-shadow: 0 8px 24px rgba(0,0,0,0.35);
 }
 
+/* 画面遷移の演出: hidden が外れて表示されるたびにフェード+スライドインする */
+@keyframes screenEnter {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.screen:not([hidden]) {
+  animation: screenEnter 0.35s ease;
+}
+
 .screen h2 {
   margin-top: 0;
 }
@@ -185,6 +194,16 @@ body {
   color: var(--accent-2);
 }
 
+/* カウント数値が変化した瞬間の強調演出 */
+@keyframes countPulse {
+  0% { transform: scale(1); }
+  35% { transform: scale(1.35); color: var(--accent); }
+  100% { transform: scale(1); }
+}
+.status-value.count-pulse {
+  animation: countPulse 0.4s ease;
+}
+
 /* players overview */
 .players-overview {
   display: flex;
@@ -242,6 +261,7 @@ body {
   font-family: inherit;
   box-shadow: 0 4px 10px rgba(0,0,0,0.3);
   transition: transform 0.1s ease;
+  animation: cardEnter 0.3s ease both;
 }
 .card-btn:hover {
   transform: translateY(-3px);
@@ -260,6 +280,42 @@ body {
 .card-btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+/* カード一覧・手札の入場演出(手札枚数に応じて呼び出し側で animation-delay をずらす) */
+@keyframes cardEnter {
+  from { opacity: 0; transform: translateY(14px) scale(0.96); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* カード使用時の演出。演出中はクリック不可にして二重発動を防ぐ(pointer-events) */
+@keyframes cardPlayPop {
+  0% { transform: scale(1) rotate(0deg); box-shadow: 0 4px 10px rgba(0,0,0,0.3); }
+  45% { transform: scale(1.08) rotate(-2deg); box-shadow: 0 0 0 6px rgba(255,179,71,0.45); }
+  100% { transform: scale(0.85) rotate(2deg); opacity: 0.25; }
+}
+.card-btn.card-playing {
+  animation: cardPlayPop 0.2s ease forwards;
+  pointer-events: none;
+}
+
+/* カードイラスト表示エリア(assets/cards/<id>.png があれば埋め込まれる。無ければDOMごと外れる) */
+.card-visual {
+  width: 100%;
+  height: 64px;
+  border-radius: 6px;
+  overflow: hidden;
+  margin-bottom: 6px;
+  background: rgba(0,0,0,0.15);
+}
+.card-visual img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.rules-card-list .card-visual {
+  height: 80px;
 }
 
 .card-btn-selected {
@@ -328,6 +384,9 @@ body {
 .move-btn:hover {
   filter: brightness(1.1);
 }
+.move-btn:active {
+  transform: scale(0.92);
+}
 .move-btn.danger {
   background: var(--danger);
   color: #2b0d0d;
@@ -354,6 +413,29 @@ body {
 .log-area p.log-highlight {
   color: var(--accent);
   font-weight: bold;
+}
+
+/* 動作確認ツール(?debug 時のみ表示) */
+.debug-panel {
+  margin-top: 16px;
+  padding: 12px 14px;
+  border: 1px dashed var(--muted);
+  border-radius: 10px;
+}
+.debug-panel summary {
+  cursor: pointer;
+  color: var(--accent-2);
+  font-size: 0.9rem;
+}
+.debug-panel .field-row {
+  margin-top: 10px;
+}
+.debug-panel select {
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid #444a5e;
+  background: var(--panel-2);
+  color: var(--text);
 }
 
 /* result screen */
@@ -418,5 +500,14 @@ body {
   }
   .card-btn {
     width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .screen:not([hidden]),
+  .card-btn,
+  .card-btn.card-playing,
+  .status-value.count-pulse {
+    animation: none !important;
   }
 }

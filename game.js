@@ -345,6 +345,63 @@ function isDirectlyPlayable(card) {
   return !hasSub(card, "enc") && !hasSub(card, "cha");
 }
 
+// カードイラスト表示規約: assets/cards/<id>.png → assets/cards/<id>.svg の順で探し、
+// 見つかった方をサムネイルとして表示する(PNGを優先することで、後から本物のイラストを
+// 同じidのPNGとして置くだけでSVGの仮絵を上書きできる=差し替えが容易)。
+// どちらも無い/読み込みに失敗した場合は静かに諦めて、従来通り色背景のみの見た目に
+// フォールバックする。
+function buildCardVisual(cardId) {
+  const visual = document.createElement("div");
+  visual.className = "card-visual";
+  const img = document.createElement("img");
+  img.alt = "";
+  img.loading = "lazy";
+  const candidates = [`assets/cards/${cardId}.png`, `assets/cards/${cardId}.svg`];
+  let nextIndex = 0;
+  const tryNext = () => {
+    if (nextIndex >= candidates.length) {
+      visual.remove();
+      return;
+    }
+    img.src = candidates[nextIndex++];
+  };
+  img.addEventListener("error", tryNext);
+  visual.appendChild(img);
+  tryNext();
+  return visual;
+}
+
+// card-btn を使う箇所(手札・cha応答・enc選択・山札プレビュー・ルール一覧)共通の中身
+function buildCardBody(card, tagText) {
+  const frag = document.createDocumentFragment();
+  frag.appendChild(buildCardVisual(card.id));
+  const name = document.createElement("span");
+  name.className = "card-name";
+  name.textContent = `${card.name}${tagText || ""}`;
+  const desc = document.createElement("span");
+  desc.className = "card-desc";
+  desc.textContent = card.desc;
+  frag.appendChild(name);
+  frag.appendChild(desc);
+  return frag;
+}
+
+// カード使用時の一瞬の演出。クリックしたボタンにアニメーションをかけてから実処理(onDone)を
+// 呼ぶ。演出中はボタンを無効化し、連打による二重発動を防ぐ。
+function triggerCardPlayAnimation(btn, onDone) {
+  btn.disabled = true;
+  btn.classList.add("card-playing");
+  setTimeout(onDone, 200);
+}
+
+// 同じ要素でCSSアニメーションを再トリガーするヘルパー(一度クラスを外して
+// 強制リフローしてから付け直す)
+function pulseElement(el, className) {
+  el.classList.remove(className);
+  void el.offsetWidth;
+  el.classList.add(className);
+}
+
 // magnitude(数値効果の基準値)を enc の倍率込みで計算してから effect を呼ぶ共通経路。
 // すべてのカード効果の発動はここを通す(通常発動・chaコピー・カードのコピー、いずれも同じ)。
 function runCardEffect(card, playerIndex, context) {
@@ -368,6 +425,7 @@ function encGrantsSpeed(encCard) {
 // ゲーム状態
 // ---------------------------------------------------------------------------
 let state = null;
+let lastRenderedCount = null;
 
 function shuffle(array) {
   const a = array.slice();
@@ -718,6 +776,7 @@ function renderChaResponseScreen() {
 
   const area = document.getElementById("cha-response-cards");
   area.innerHTML = "";
+  let shown = 0;
   player.hand.forEach((cardId, idx) => {
     const c = CARD_MAP[cardId];
     if (!hasSub(c, "cha")) return;
@@ -725,10 +784,12 @@ function renderChaResponseScreen() {
     const btn = document.createElement("button");
     btn.className = "card-btn";
     btn.style.background = c.color;
+    btn.style.animationDelay = `${shown * 40}ms`;
+    shown++;
     btn.type = "button";
-    btn.innerHTML = `<span class="card-name">${c.name}</span><span class="card-desc">${c.desc}</span>`;
+    btn.appendChild(buildCardBody(c));
     if (usable) {
-      btn.addEventListener("click", () => playChaResponse(idx));
+      btn.addEventListener("click", () => triggerCardPlayAnimation(btn, () => playChaResponse(idx)));
     } else {
       btn.disabled = true;
       btn.title = "今の場札には割り込めません。";
@@ -867,7 +928,12 @@ function showTransitionScreen() {
 function render() {
   const player = state.players[state.currentPlayerIndex];
 
-  document.getElementById("current-count").textContent = state.count;
+  const countEl = document.getElementById("current-count");
+  if (lastRenderedCount !== null && lastRenderedCount !== state.count) {
+    pulseElement(countEl, "count-pulse");
+  }
+  countEl.textContent = state.count;
+  lastRenderedCount = state.count;
   document.getElementById("current-limit").textContent = state.limit;
   document.getElementById("current-direction").textContent =
     state.direction === 1 ? "→" : "←";
@@ -897,19 +963,20 @@ function render() {
       const btn = document.createElement("button");
       btn.className = "card-btn";
       btn.style.background = card.color;
+      btn.style.animationDelay = `${idx * 40}ms`;
       btn.type = "button";
       const tag =
         card.category === "attack" ? " [攻撃]" :
         hasSub(card, "enc") ? " [enc]" :
         hasSub(card, "cha") ? " [cha]" :
         hasSub(card, "速攻") ? " [速攻]" : "";
-      btn.innerHTML = `<span class="card-name">${card.name}${tag}</span><span class="card-desc">${card.desc}</span>`;
+      btn.appendChild(buildCardBody(card, tag));
       const reason = cardUnavailableReason(card, player.hand, idx);
       if (reason) {
         btn.disabled = true;
         btn.title = reason;
       } else {
-        btn.addEventListener("click", () => beginCardPlay(idx));
+        btn.addEventListener("click", () => triggerCardPlayAnimation(btn, () => beginCardPlay(idx)));
       }
       handArea.appendChild(btn);
     });
@@ -963,14 +1030,15 @@ function renderPlayModal() {
     const desc = document.createElement("p");
     desc.textContent = "同時に使う enc カードを選べます(複数選択可・選ばなくてもOK)。";
     body.appendChild(desc);
-    eligibleEncIndexes().forEach((idx) => {
+    eligibleEncIndexes().forEach((idx, i) => {
       const c = CARD_MAP[state.players[state.currentPlayerIndex].hand[idx]];
       const selected = pp.encSelected.includes(idx);
       const btn = document.createElement("button");
       btn.className = "card-btn" + (selected ? " card-btn-selected" : "");
       btn.style.background = c.color;
+      btn.style.animationDelay = `${i * 40}ms`;
       btn.type = "button";
-      btn.innerHTML = `<span class="card-name">${c.name}${selected ? " ✓選択中" : ""}</span><span class="card-desc">${c.desc}</span>`;
+      btn.appendChild(buildCardBody(c, selected ? " ✓選択中" : ""));
       btn.addEventListener("click", () => toggleEncForPlay(idx));
       body.appendChild(btn);
     });
@@ -1009,14 +1077,15 @@ function renderPlayModal() {
     const desc = document.createElement("p");
     desc.textContent = "山札の上から見えたカードの中から1枚選んで引きます。";
     body.appendChild(desc);
-    pp.peeked.forEach((cardId) => {
+    pp.peeked.forEach((cardId, i) => {
       const c = CARD_MAP[cardId];
       const btn = document.createElement("button");
       btn.className = "card-btn";
       btn.style.background = c.color;
+      btn.style.animationDelay = `${i * 40}ms`;
       btn.type = "button";
-      btn.innerHTML = `<span class="card-name">${c.name}</span><span class="card-desc">${c.desc}</span>`;
-      btn.addEventListener("click", () => choosePeekForPlay(cardId));
+      btn.appendChild(buildCardBody(c));
+      btn.addEventListener("click", () => triggerCardPlayAnimation(btn, () => choosePeekForPlay(cardId)));
       body.appendChild(btn);
     });
   }
@@ -1075,6 +1144,7 @@ function startGame() {
   }
 
   state = createGame({ playerNames, limit, maxAdvance, handSize, deckCopies });
+  lastRenderedCount = null;
   startTurn(0);
   addLog(`ゲーム開始!上限${state.limit} / 最大カウント${state.baseMaxAdvance}`, true);
   showTransitionScreen();
@@ -1086,19 +1156,50 @@ function startGame() {
 function renderRulesModal() {
   const list = document.getElementById("rules-card-list");
   list.innerHTML = "";
-  for (const card of CARD_TYPES) {
+  CARD_TYPES.forEach((card, i) => {
     const box = document.createElement("div");
     box.className = "card-btn";
     box.style.background = card.color;
+    box.style.animationDelay = `${i * 20}ms`;
     const tags = [];
     if (card.category === "attack") tags.push("攻撃");
     if (hasSub(card, "速攻")) tags.push("速攻");
     if (hasSub(card, "cha")) tags.push("cha");
     if (hasSub(card, "enc")) tags.push("enc");
     const tagText = tags.length ? ` [${tags.join("/")}]` : "";
-    box.innerHTML = `<span class="card-name">${card.name}${tagText}</span><span class="card-desc">${card.desc}</span>`;
+    box.appendChild(buildCardBody(card, tagText));
     list.appendChild(box);
-  }
+  });
+}
+
+// ---------------------------------------------------------------------------
+// 動作確認ツール(URLに ?debug を付けた時だけ表示。新しいカードを実際に手札に
+// 入れて挙動を確かめられる。詳しくは CARD_GUIDE.md を参照)
+// ---------------------------------------------------------------------------
+const DEBUG_MODE = new URLSearchParams(location.search).has("debug");
+
+function setupDebugPanel() {
+  const panel = document.getElementById("debug-panel");
+  panel.hidden = !DEBUG_MODE;
+  if (!DEBUG_MODE) return;
+
+  const select = document.getElementById("debug-card-select");
+  CARD_TYPES.forEach((card) => {
+    const opt = document.createElement("option");
+    opt.value = card.id;
+    opt.textContent = `${card.name} (${card.id})`;
+    select.appendChild(opt);
+  });
+}
+
+function debugGiveSelectedCard() {
+  if (!state) return;
+  const cardId = document.getElementById("debug-card-select").value;
+  if (!cardId || !CARD_MAP[cardId]) return;
+  const player = state.players[state.currentPlayerIndex];
+  player.hand.push(cardId);
+  addLog(`[動作確認] ${player.name}の手札に「${CARD_MAP[cardId].name}」を追加した。`, true);
+  render();
 }
 
 // ---------------------------------------------------------------------------
@@ -1130,9 +1231,12 @@ document.getElementById("rules-modal").addEventListener("click", (e) => {
 document.getElementById("cha-reveal-btn").addEventListener("click", revealChaResponse);
 document.getElementById("cha-pass-btn").addEventListener("click", passChaResponse);
 
+document.getElementById("debug-give-card-btn").addEventListener("click", debugGiveSelectedCard);
+
 // ---------------------------------------------------------------------------
 // 初期化
 // ---------------------------------------------------------------------------
 renderPlayerNameFields();
 renderRulesModal();
+setupDebugPanel();
 showScreen("setup-screen");
