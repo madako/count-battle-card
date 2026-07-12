@@ -115,6 +115,15 @@ body {
 .player-name-fields .field-row input[type="text"] {
   width: 200px;
 }
+.npc-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 0.85rem;
+  white-space: nowrap;
+  cursor: pointer;
+}
 
 .advanced-settings {
   margin: 12px 0;
