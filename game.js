@@ -454,6 +454,7 @@ function createGame(config) {
     hand: [],
     safeguard: false,
     advanceMultiplier: 1,
+    isNPC: !!(config.isNPC && config.isNPC[i]),
   }));
 
   for (const player of players) {
@@ -753,6 +754,12 @@ function beginChaPhase(card, playerIndex, context) {
 function advanceChaBuilding() {
   while (state.chaQueue.length) {
     const responder = state.chaQueue[0];
+    if (state.players[responder].isNPC) {
+      // NPCはまだcha割り込みの判断を持たない(常にパス扱い)。判断ロジックが
+      // 増えたらここで npcDecideChaResponse 相当を呼ぶ形に置き換える。
+      state.chaQueue.shift();
+      continue;
+    }
     const hasAnyChaCard = state.players[responder].hand.some((id) => hasSub(CARD_MAP[id], "cha"));
     if (!hasAnyChaCard) {
       state.chaQueue.shift();
@@ -863,8 +870,14 @@ function resolveChaStack() {
   }
 
   if (wasRevealed) {
-    document.getElementById("transition-player-name").textContent = state.players[originalHostIndex].name;
-    showScreen("transition-screen");
+    if (state.players[originalHostIndex].isNPC) {
+      // cha解決を待つ間に人間側の画面が表示されていたはずなので、NPCの続きの手番を再開する
+      render();
+      setTimeout(() => runNpcTurn(originalHostIndex), 450);
+    } else {
+      document.getElementById("transition-player-name").textContent = state.players[originalHostIndex].name;
+      showScreen("transition-screen");
+    }
   } else {
     render();
   }
@@ -910,7 +923,11 @@ function endTurnAndAdvance() {
     next = nextIndex(next);
   }
   startTurn(next);
-  showTransitionScreen();
+  if (state.players[next].isNPC) {
+    showNpcTurnScreen(next);
+  } else {
+    showTransitionScreen();
+  }
 }
 
 function finishGame(loser) {
@@ -938,6 +955,124 @@ function showTransitionScreen() {
   const player = state.players[state.currentPlayerIndex];
   document.getElementById("transition-player-name").textContent = player.name;
   showScreen("transition-screen");
+}
+
+// ---------------------------------------------------------------------------
+// NPC(コンピュータ操作のプレイヤー)
+// ---------------------------------------------------------------------------
+// NPCの手番は目隠しが不要なので専用の npc-turn-screen を出し、少し間を置いてから
+// 自動でカードを使ったりカウントを進めたりする。判断ロジックは単純なルールベース
+// (探索や学習は行わない)。実際の状態変更は人間の操作と同じ関数
+// (resolvePlayFlow/advanceCount 等)を通すことで、既存のcha/enc/グラフ記録などの
+// 仕組みをそのまま利用する。
+function showNpcTurnScreen(playerIndex) {
+  const player = state.players[playerIndex];
+  document.getElementById("npc-turn-player-name").textContent = player.name;
+  showScreen("npc-turn-screen");
+  setTimeout(() => runNpcTurn(playerIndex), 500);
+}
+
+// このターンに使うカードを選ぶ(手札インデックスを返す。使わないならnull)。
+// 速攻は積極的に、通常カードはほどほどの確率で使う程度の単純な判断。
+function npcChooseCardToPlay(playerIndex) {
+  const player = state.players[playerIndex];
+  const eligible = player.hand
+    .map((id, idx) => ({ idx, card: CARD_MAP[id] }))
+    .filter(({ card, idx }) => isDirectlyPlayable(card) && !cardUnavailableReason(card, player.hand, idx));
+  if (!eligible.length) return null;
+
+  const speedy = eligible.filter(({ card }) => hasSub(card, "速攻"));
+  if (speedy.length && Math.random() < 0.7) {
+    return speedy[Math.floor(Math.random() * speedy.length)].idx;
+  }
+  const normal = eligible.filter(({ card }) => !hasSub(card, "速攻"));
+  if (normal.length && Math.random() < 0.5) {
+    return normal[Math.floor(Math.random() * normal.length)].idx;
+  }
+  return null;
+}
+
+// 攻撃カードの対象: 手札が一番多い相手を狙う(同数ならその中からランダム)
+function npcChooseTarget(playerIndex) {
+  const others = state.players.map((_, i) => i).filter((i) => i !== playerIndex);
+  const maxHand = Math.max(...others.map((i) => state.players[i].hand.length));
+  const candidates = others.filter((i) => state.players[i].hand.length === maxHand);
+  return candidates[Math.floor(Math.random() * candidates.length)];
+}
+
+// 選択肢カードの判断(タイムトリックは上限までの余裕で+5/-5を選ぶ。それ以外はランダム)
+function npcChooseChoice(card) {
+  if (card.id === "time_trick") {
+    return state.limit - state.count <= 10 ? "minus" : "plus";
+  }
+  return card.choices[Math.floor(Math.random() * card.choices.length)].key;
+}
+
+// 山札を見て選ぶカード(choose): 単純に先頭の1枚を選ぶ
+function npcChoosePeek(peeked) {
+  return peeked[0];
+}
+
+// カウントの前進量: 最大値ぎりぎりは避けつつ、それなりの数を選ぶ
+function npcChooseAdvanceAmount() {
+  const maxAdvance = Math.min(effectiveMaxAdvance(), state.limit - state.count);
+  if (maxAdvance <= 1) return Math.max(1, maxAdvance);
+  const safeMax = maxAdvance - 1;
+  return 1 + Math.floor(Math.random() * safeMax);
+}
+
+// 人間の手札クリック(beginCardPlay)を経由せず、state.pendingPlay を直接組み立てて
+// resolvePlayFlow に渡す。モーダルを表示しないだけで、解決ロジックは完全に共通。
+function npcPlayCard(playerIndex, handIndex) {
+  const player = state.players[playerIndex];
+  const cardId = player.hand[handIndex];
+  const card = CARD_MAP[cardId];
+
+  const pendingPlay = {
+    handIndex,
+    cardId,
+    encSelected: [], // NPCは現時点でencを添付しない
+    encAsked: true,
+    targetIndex: card.needsTarget ? npcChooseTarget(playerIndex) : null,
+    choice: card.choices ? npcChooseChoice(card) : null,
+    peeked: null,
+    peekDone: true,
+    step: null,
+  };
+
+  if (card.peek) {
+    const peeked = [];
+    for (let i = 0; i < card.peek; i++) {
+      const c = state.deck.pop();
+      if (c) peeked.push(c);
+    }
+    pendingPlay.peeked = peeked;
+    if (peeked.length) pendingPlay.choice = npcChoosePeek(peeked);
+  }
+
+  state.pendingPlay = pendingPlay;
+  resolvePlayFlow();
+}
+
+// NPCの手番のメインループ。1枚使うたびに少し待ってから次を判断する。
+// - cha解決が人間の応答待ちで中断した場合(state.chaStackが残る)は、resolveChaStack側が
+//   後で runNpcTurn を呼び直して再開する
+// - 「パス」カードなどでターンが既に終わっている場合(currentPlayerIndexが変わっている)は
+//   何もしない
+function runNpcTurn(playerIndex) {
+  if (!state || state.currentPlayerIndex !== playerIndex) return;
+
+  const handIndex = npcChooseCardToPlay(playerIndex);
+  if (handIndex != null) {
+    npcPlayCard(playerIndex, handIndex);
+    if (state.chaStack) return;
+    if (!state || state.currentPlayerIndex !== playerIndex) return;
+    setTimeout(() => runNpcTurn(playerIndex), 450);
+    return;
+  }
+
+  const amount = npcChooseAdvanceAmount();
+  advanceCount(amount);
 }
 
 // ---------------------------------------------------------------------------
@@ -1119,7 +1254,7 @@ function render() {
     const chip = document.createElement("span");
     chip.className = "player-chip";
     if (i === state.currentPlayerIndex) chip.classList.add("current");
-    chip.textContent = `${p.name} (手札${p.hand.length}${p.safeguard ? " 🛡" : ""})`;
+    chip.textContent = `${p.name} (手札${p.hand.length}${p.safeguard ? " 🛡" : ""}${p.isNPC ? " 🤖" : ""})`;
     overview.appendChild(chip);
   });
 
@@ -1291,6 +1426,16 @@ function renderPlayerNameFields() {
     input.placeholder = `プレイヤー${i + 1}`;
     row.appendChild(label);
     row.appendChild(input);
+
+    const npcLabel = document.createElement("label");
+    npcLabel.className = "npc-toggle";
+    const npcCheckbox = document.createElement("input");
+    npcCheckbox.type = "checkbox";
+    npcCheckbox.id = `player-npc-${i}`;
+    npcLabel.appendChild(npcCheckbox);
+    npcLabel.appendChild(document.createTextNode("NPC"));
+    row.appendChild(npcLabel);
+
     container.appendChild(row);
   }
 }
@@ -1312,16 +1457,23 @@ function startGame() {
   const deckCopies = clampInt(document.getElementById("deck-copies").value, 1, 20, 4);
 
   const playerNames = [];
+  const isNPC = [];
   for (let i = 0; i < playerCount; i++) {
     const input = document.getElementById(`player-name-${i}`);
     playerNames.push(input && input.value.trim() ? input.value.trim() : "");
+    const npcCheckbox = document.getElementById(`player-npc-${i}`);
+    isNPC.push(!!(npcCheckbox && npcCheckbox.checked));
   }
 
-  state = createGame({ playerNames, limit, maxAdvance, handSize, deckCopies });
+  state = createGame({ playerNames, limit, maxAdvance, handSize, deckCopies, isNPC });
   lastRenderedCount = null;
   startTurn(0);
   addLog(`ゲーム開始!上限${state.limit} / 最大カウント${state.baseMaxAdvance}`, true);
-  showTransitionScreen();
+  if (state.players[0].isNPC) {
+    showNpcTurnScreen(0);
+  } else {
+    showTransitionScreen();
+  }
 }
 
 // ---------------------------------------------------------------------------
