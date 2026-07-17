@@ -60,16 +60,21 @@
       <p class="transition-label">次の番</p>
       <h2 id="transition-player-name"></h2>
       <p class="transition-hint">他のプレイヤーは画面を見ないようにしてください。</p>
+      <div id="transition-recap" class="transition-recap" hidden>
+        <p class="transition-recap-title">前回からの出来事</p>
+        <div id="transition-recap-list"></div>
+      </div>
       <button id="reveal-hand-btn" class="primary-btn" type="button">自分の番を始める</button>
     </div>
   </section>
 
-  <!-- NPCの番(目隠し不要・自動進行) -->
+  <!-- NPCの番(目隠し不要・自動進行。行動は下のフィードに実況表示される) -->
   <section id="npc-turn-screen" class="screen" hidden>
     <div class="transition-box">
       <p class="transition-label">NPCの番</p>
       <h2 id="npc-turn-player-name"></h2>
       <p class="transition-hint">考え中…</p>
+      <div id="npc-action-feed" class="npc-action-feed"></div>
     </div>
   </section>
 

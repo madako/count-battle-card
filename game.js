@@ -428,6 +428,11 @@ function encGrantsSpeed(encCard) {
 // ---------------------------------------------------------------------------
 let state = null;
 let lastRenderedCount = null;
+// 人間が最後にログを見た(=ゲーム画面を開いた)時点のログ件数。目隠し画面の
+// 「前回からの出来事」表示に使う
+let humanSeenLogLength = 0;
+// 現在のNPCの手番の実況フィードの起点(このターンで増えたログだけを表示する)
+let npcFeedLogStart = 0;
 
 function shuffle(array) {
   const a = array.slice();
@@ -871,9 +876,9 @@ function resolveChaStack() {
 
   if (wasRevealed) {
     if (state.players[originalHostIndex].isNPC) {
-      // cha解決を待つ間に人間側の画面が表示されていたはずなので、NPCの続きの手番を再開する
+      // cha解決を待つ間は人間側の画面が表示されていたので、NPC画面に戻して手番を再開する
       render();
-      setTimeout(() => runNpcTurn(originalHostIndex), 450);
+      showNpcTurnScreen(originalHostIndex, true);
     } else {
       document.getElementById("transition-player-name").textContent = state.players[originalHostIndex].name;
       showScreen("transition-screen");
@@ -954,7 +959,28 @@ function showScreen(id) {
 function showTransitionScreen() {
   const player = state.players[state.currentPlayerIndex];
   document.getElementById("transition-player-name").textContent = player.name;
+  renderTransitionRecap();
   showScreen("transition-screen");
+}
+
+// 目隠し画面に「前回自分がログを見てから起きたこと」(NPCの行動など)を表示する。
+// 手札は含まれないログの転記なので、目隠しの目的(手札を見せない)は損なわない。
+function renderTransitionRecap() {
+  const box = document.getElementById("transition-recap");
+  const list = document.getElementById("transition-recap-list");
+  const entries = state.log.slice(humanSeenLogLength).slice(-12);
+  list.innerHTML = "";
+  if (!entries.length) {
+    box.hidden = true;
+    return;
+  }
+  box.hidden = false;
+  for (const entry of entries) {
+    const p = document.createElement("p");
+    if (entry.highlight) p.className = "log-highlight";
+    p.textContent = entry.message;
+    list.appendChild(p);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -965,11 +991,27 @@ function showTransitionScreen() {
 // (探索や学習は行わない)。実際の状態変更は人間の操作と同じ関数
 // (resolvePlayFlow/advanceCount 等)を通すことで、既存のcha/enc/グラフ記録などの
 // 仕組みをそのまま利用する。
-function showNpcTurnScreen(playerIndex) {
+// resume=true は、cha割り込みなどで中断した手番の再開(実況フィードをリセットしない)
+function showNpcTurnScreen(playerIndex, resume) {
   const player = state.players[playerIndex];
   document.getElementById("npc-turn-player-name").textContent = player.name;
+  if (!resume) npcFeedLogStart = state.log.length;
+  renderNpcActionFeed();
   showScreen("npc-turn-screen");
-  setTimeout(() => runNpcTurn(playerIndex), 500);
+  setTimeout(() => runNpcTurn(playerIndex), 800);
+}
+
+// NPCの手番中の実況表示: このターンに増えたログをそのまま1行ずつ見せる
+function renderNpcActionFeed() {
+  const feed = document.getElementById("npc-action-feed");
+  feed.innerHTML = "";
+  const entries = state.log.slice(npcFeedLogStart);
+  for (const entry of entries) {
+    const p = document.createElement("p");
+    if (entry.highlight) p.className = "log-highlight";
+    p.textContent = entry.message;
+    feed.appendChild(p);
+  }
 }
 
 // このターンに使うカードを選ぶ(手札インデックスを返す。使わないならnull)。
@@ -1067,7 +1109,8 @@ function runNpcTurn(playerIndex) {
     npcPlayCard(playerIndex, handIndex);
     if (state.chaStack) return;
     if (!state || state.currentPlayerIndex !== playerIndex) return;
-    setTimeout(() => runNpcTurn(playerIndex), 450);
+    renderNpcActionFeed();
+    setTimeout(() => runNpcTurn(playerIndex), 800);
     return;
   }
 
@@ -1469,6 +1512,7 @@ function startGame() {
   lastRenderedCount = null;
   startTurn(0);
   addLog(`ゲーム開始!上限${state.limit} / 最大カウント${state.baseMaxAdvance}`, true);
+  humanSeenLogLength = state.log.length;
   if (state.players[0].isNPC) {
     showNpcTurnScreen(0);
   } else {
@@ -1537,6 +1581,8 @@ document.getElementById("start-game-btn").addEventListener("click", startGame);
 document.getElementById("reveal-hand-btn").addEventListener("click", () => {
   showScreen("game-screen");
   render();
+  // ゲーム画面を開いた時点でログは全部見えるので、「前回からの出来事」の起点を進める
+  humanSeenLogLength = state.log.length;
 });
 
 document.getElementById("restart-btn").addEventListener("click", () => {
