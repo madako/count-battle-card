@@ -178,6 +178,45 @@ body {
   margin-bottom: 24px;
 }
 
+/* NPCの手番の実況フィード / 目隠し画面の「前回からの出来事」 */
+.npc-action-feed,
+.transition-recap {
+  background: var(--panel-2);
+  border-radius: 10px;
+  padding: 10px 14px;
+  margin: 0 auto 16px;
+  max-width: 480px;
+  text-align: left;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+.npc-action-feed:empty {
+  display: none;
+}
+.npc-action-feed p,
+.transition-recap p {
+  margin: 4px 0;
+}
+.npc-action-feed p.log-highlight,
+.transition-recap p.log-highlight {
+  color: var(--accent);
+  font-weight: bold;
+}
+.transition-recap-title {
+  color: var(--accent-2);
+  font-weight: bold;
+  font-size: 0.8rem;
+}
+/* フィードの新しい行はふわっと現れる */
+.npc-action-feed p {
+  animation: cardEnter 0.3s ease both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .npc-action-feed p {
+    animation: none !important;
+  }
+}
+
 /* status bar */
 .status-bar {
   display: flex;
