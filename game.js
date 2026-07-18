@@ -1014,24 +1014,99 @@ function renderNpcActionFeed() {
   }
 }
 
+// コピー・墓荒らしの発動条件になる「いいカード」の集合。直前に他のプレイヤーが
+// これらを使った時だけ、便乗する価値があると判断する
+const NPC_GOOD_CARD_IDS = new Set([
+  "new_game",
+  "safeguard",
+  "double_limit",
+  "draw_card",
+  "choose",
+  "steal",
+]);
+
+// カードごとに「今この状況で使うべきか」を優先度(0以下=使わない)で返す。
+// 方針: カードはむやみに使わず、必要な状況でだけ切る。
+//   - ドロー系(draw_card/choose)は手札が増えるだけ得なので即使う
+//   - 負け回避系(pass/safeguard/new_game/double_limit/time_trick)は上限が迫った時だけ
+//   - コピー・墓荒らしは他のプレイヤーがいいカードを使った直後だけ
+//   - 妨害系(skip/reverse/forced_number)は終盤の駆け引きにだけ
+//   - dash/count_boost は「次の人を残り1に追い込む」一押しが足りない時だけ
+// ここに載っていないカード(今後追加されるカード含む)は温存する。
+// 新カードをNPCに使わせたい場合はこの関数に分岐を足す(CARD_GUIDE.md参照)。
+function npcCardPriority(card, playerIndex) {
+  const remaining = state.limit - state.count;
+  const maxAdv = effectiveMaxAdvance();
+  switch (card.id) {
+    case "draw_card":
+    case "choose":
+      return 3;
+    case "grave_robber":
+    case "copy_card": {
+      const last = state.lastPlayedCard;
+      if (!last || last.playerIndex === playerIndex) return 0;
+      if (!NPC_GOOD_CARD_IDS.has(last.cardId)) return 0;
+      if (card.id === "copy_card") {
+        const lastCard = CARD_MAP[last.cardId];
+        if (last.cardId === "copy_card" || hasSub(lastCard, "cha") || hasSub(lastCard, "enc")) return 0;
+      }
+      return 2;
+    }
+    case "pass":
+      // 1でも進むと負ける状況の最終手段
+      return remaining <= 1 ? 6 : 0;
+    case "safeguard":
+      return remaining <= Math.max(3, maxAdv) ? 5 : 0;
+    case "new_game":
+      return remaining <= 2 ? 5 : 0;
+    case "double_limit":
+      return remaining <= 2 ? 4 : 0;
+    case "time_trick":
+      // 残りわずかな時に-5して危険地帯から離脱する(選択はnpcChooseChoiceがminusを選ぶ)
+      return remaining <= 5 ? 4 : 0;
+    case "reverse":
+      // 2人対戦では方向を変えても手番順が変わらないため使わない
+      if (state.players.length <= 2) return 0;
+      return remaining <= state.baseMaxAdvance * 2 ? 2 : 0;
+    case "skip":
+      // 次の人を残り1に追い込めるのに、その相手を飛ばしてしまっては本末転倒
+      if (remaining - 1 >= 1 && remaining - 1 <= maxAdv) return 0;
+      return remaining <= state.baseMaxAdvance * 2 ? 2 : 0;
+    case "forced_number":
+      return remaining <= state.baseMaxAdvance * 2 ? 2 : 0;
+    case "dash":
+    case "count_boost": {
+      const desired = remaining - 1;
+      if (desired > maxAdv && desired <= maxAdv + (card.magnitude || 1)) return 4;
+      return 0;
+    }
+    case "steal": {
+      const my = state.players[playerIndex].hand.length;
+      const most = Math.max(
+        ...state.players.filter((_, i) => i !== playerIndex).map((p) => p.hand.length)
+      );
+      return most - my >= 2 ? 2 : 0;
+    }
+    default:
+      return 0;
+  }
+}
+
 // このターンに使うカードを選ぶ(手札インデックスを返す。使わないならnull)。
-// 速攻は積極的に、通常カードはほどほどの確率で使う程度の単純な判断。
+// 使える札の中から npcCardPriority が最も高いもの(0以下しかなければ使わない)。
 function npcChooseCardToPlay(playerIndex) {
   const player = state.players[playerIndex];
-  const eligible = player.hand
-    .map((id, idx) => ({ idx, card: CARD_MAP[id] }))
-    .filter(({ card, idx }) => isDirectlyPlayable(card) && !cardUnavailableReason(card, player.hand, idx));
-  if (!eligible.length) return null;
-
-  const speedy = eligible.filter(({ card }) => hasSub(card, "速攻"));
-  if (speedy.length && Math.random() < 0.7) {
-    return speedy[Math.floor(Math.random() * speedy.length)].idx;
-  }
-  const normal = eligible.filter(({ card }) => !hasSub(card, "速攻"));
-  if (normal.length && Math.random() < 0.5) {
-    return normal[Math.floor(Math.random() * normal.length)].idx;
-  }
-  return null;
+  let best = null;
+  player.hand.forEach((id, idx) => {
+    const card = CARD_MAP[id];
+    if (!isDirectlyPlayable(card)) return;
+    if (cardUnavailableReason(card, player.hand, idx)) return;
+    const priority = npcCardPriority(card, playerIndex);
+    if (priority > 0 && (!best || priority > best.priority)) {
+      best = { idx, priority };
+    }
+  });
+  return best ? best.idx : null;
 }
 
 // 攻撃カードの対象: 手札が一番多い相手を狙う(同数ならその中からランダム)
@@ -1055,10 +1130,13 @@ function npcChoosePeek(peeked) {
   return peeked[0];
 }
 
-// カウントの前進量: 最大値ぎりぎりは避けつつ、それなりの数を選ぶ
+// カウントの前進量: 次のプレイヤーを「残り1(進むと負け)」に追い込めるならその数を
+// 選び、そうでなければ上限ぎりぎりは避けてランダムに進める
 function npcChooseAdvanceAmount() {
-  const maxAdvance = Math.min(effectiveMaxAdvance(), state.limit - state.count);
+  const remaining = state.limit - state.count;
+  const maxAdvance = Math.min(effectiveMaxAdvance(), remaining);
   if (maxAdvance <= 1) return Math.max(1, maxAdvance);
+  if (remaining - 1 >= 1 && remaining - 1 <= maxAdvance) return remaining - 1;
   const safeMax = maxAdvance - 1;
   return 1 + Math.floor(Math.random() * safeMax);
 }
